@@ -23,7 +23,7 @@ tone_color_converter.load_ckpt(f'{ckpt_converter}/checkpoint.pth')
 os.makedirs(output_dir, exist_ok=True)
 
 # Use mam1.mp3 as the reference speaker (voice to clone)
-reference_speaker = 'resources/John1.mp3'  # Path to the new voice sample
+reference_speaker = 'resources/john1.mp3'  # Path to the new voice sample
 target_se, audio_name = se_extractor.get_se(reference_speaker, tone_color_converter, vad=False)
 
 from melo.api import TTS
