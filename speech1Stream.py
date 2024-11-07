@@ -1,6 +1,7 @@
 import os
 import torch
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import logging
 from openvoice import se_extractor
 from openvoice.api import ToneColorConverter
@@ -8,7 +9,6 @@ from melo.api import TTS
 import traceback
 import io
 import soundfile as sf
-from flask_cors import CORS  # Import CORS
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
@@ -16,27 +16,18 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(mes
 # Check if GPU is available and set the device accordingly
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 logging.info(f"Using device: {device}")
-if device == "cuda:0":
-    logging.info(f"CUDA is available. GPU will be used: {torch.cuda.get_device_name(0)}")
-else:
-    logging.info("CUDA is not available. Running on CPU.")
 
 # Paths and configurations
 ckpt_converter = 'checkpoints_v2/converter'
 output_dir = 'outputs_v2'
 
-# Initialize the tone color converter
+# Load models and converters once at startup
 tone_color_converter = ToneColorConverter(f'{ckpt_converter}/config.json', device=device)
-logging.info("Loading tone color converter checkpoint...")
 tone_color_converter.load_ckpt(f'{ckpt_converter}/checkpoint.pth')
 logging.info("Tone color converter loaded successfully.")
 
-# Ensure output directory exists
-os.makedirs(output_dir, exist_ok=True)
-
 # Use john1.mp3 as the reference speaker (voice to clone)
 reference_speaker = 'resources/john1.mp3'  # Path to the new voice sample
-logging.info(f"Extracting speaker embedding from reference speaker: {reference_speaker}")
 target_se, audio_name = se_extractor.get_se(reference_speaker, tone_color_converter, vad=False)
 logging.info("Speaker embedding extracted successfully.")
 
@@ -58,17 +49,22 @@ def convert_text_to_speech():
         speed = data.get('speed', 1.0)
         speaker_id = data.get('speaker_id', 0)  # Add default speaker_id
 
-        if not text:
-            logging.error("Text is a required field.")
-            return jsonify({'error': 'Text is a required field.'}), 400
+        if not text or not isinstance(text, str):
+            logging.error("Text is a required field and must be a valid string.")
+            return jsonify({'error': 'Text is a required field and must be a valid string.'}), 400
 
         # Create temporary files
-        temp_tts_file = 'temp_tts_output.wav'
+        temp_tts_file = os.path.join(output_dir, 'temp_tts_output.wav')
         
         try:
             # Generate TTS audio to temporary file
             model = TTS(language=language, device=device)
-            model.tts_to_file(text, speaker_id, temp_tts_file, speed=speed)
+            model.tts_to_file(text, speaker_id, temp_tts_file, speed=speed)  # Use existing method
+            
+            # Check if the file was created and has content
+            if not os.path.exists(temp_tts_file) or os.path.getsize(temp_tts_file) == 0:
+                logging.error("No audio segments found! The TTS model did not generate any audio.")
+                return jsonify({'error': 'No audio segments found! The TTS model did not generate any audio.'}), 500
             
             # Extract source speaker embedding from the TTS output
             source_se, _ = se_extractor.get_se(temp_tts_file, tone_color_converter, vad=False)
@@ -82,13 +78,13 @@ def convert_text_to_speech():
             # Create output buffer for streaming
             output_buffer = io.BytesIO()
             
-            # Write the converted audio to the buffer using the TTS model's sampling rate
+            # Write the converted audio to the output buffer
             sampling_rate = 24000  # OpenVoice typically uses 24kHz
             sf.write(output_buffer, converted_audio, sampling_rate, format='WAV')
             
             # Prepare buffer for streaming
             output_buffer.seek(0)
-            
+
             return send_file(
                 output_buffer,
                 mimetype='audio/wav',

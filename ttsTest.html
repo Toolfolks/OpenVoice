@@ -32,6 +32,12 @@
             padding: 10px;
             border-radius: 4px;
         }
+        #latency {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            color: blue;
+        }
     </style>
 </head>
 <body>
@@ -52,12 +58,15 @@
 
         <button id="convertButton" onclick="convertText()">Convert to Speech</button>
         <div id="status"></div>
+        <div id="latency"></div>
 
         <script>
             async function convertText() {
                 const button = document.getElementById('convertButton');
                 button.disabled = true;
                 document.getElementById('status').textContent = '';
+
+                const startTime = performance.now();
 
                 try {
                     const text = document.getElementById('text').value;
@@ -86,6 +95,13 @@
 
                     const audioUrl = URL.createObjectURL(await response.blob());
                     const audio = new Audio(audioUrl);
+
+                    audio.addEventListener('play', () => {
+                        const endTime = performance.now();
+                        const latency = endTime - startTime;
+                        document.getElementById('latency').textContent = `Latency: ${latency.toFixed(2)} ms`;
+                    });
+
                     audio.play();
                     document.getElementById('status').textContent = 'Audio is playing...';
 
